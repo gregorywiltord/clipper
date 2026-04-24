@@ -1,5 +1,4 @@
 import os, json, subprocess, requests, sys, time
-from pytube import YouTube
 
 job_id = sys.argv[1]
 BASE = f"/data/{job_id}"
@@ -9,18 +8,38 @@ def update(msg):
     with open(f"{BASE}/status.txt", "w") as f:
         f.write(msg)
 
-def run(cmd, retries=3):
+def run(cmd, retries=5):
+    strategies = [
+        [],  # Try 1: Default
+        ["--extractor-args", "youtube:player_client=android"],  # Try 2: Android
+        ["--extractor-args", "youtube:player_client=web"],  # Try 3: Web
+        ["-U"],  # Try 4: Update
+        ["--no-cache-dir", "-U"],  # Try 5: No cache + update
+    ]
+    
     for attempt in range(retries):
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        # Build command with strategy
+        if "yt-dlp" in cmd[0] and attempt > 0:
+            strategy_idx = min(attempt - 1, len(strategies) - 1)
+            strategy = strategies[strategy_idx]
+            # Insert strategy args after yt-dlp
+            test_cmd = cmd[:1] + strategy + cmd[1:]
+        else:
+            test_cmd = cmd
+            
+        result = subprocess.run(test_cmd, capture_output=True, text=True, check=False)
         if result.returncode == 0:
             return
+            
         error_msg = result.stderr or result.stdout or "Unknown error"
         print(f"DEBUG - Attempt {attempt + 1}/{retries}")
-        print(f"DEBUG - Command: {' '.join(cmd)}")
+        print(f"DEBUG - Command: {' '.join(test_cmd)}")
         print(f"DEBUG - Return code: {result.returncode}")
-        print(f"DEBUG - Error: {error_msg}")
+        print(f"DEBUG - Error: {error_msg[:200]}")
+        
         if attempt < retries - 1:
-            time.sleep(5 * (2 ** attempt))  # longer backoff
+            time.sleep(5 * (2 ** attempt))  # exponential backoff
+            
     raise Exception(f"Command failed after {retries} attempts: {' '.join(cmd)}\n{error_msg}")
 
 try:
@@ -28,20 +47,17 @@ try:
     url, api_key = data["url"], data["api_key"]
 
     update("Downloading video...")
-    yt = YouTube(url)
-    stream = yt.streams.filter(progressive=False, file_extension='mp4').order_by('resolution').desc().first()
-    if not stream:
-        stream = yt.streams.get_highest_resolution()
-    video_path = stream.download(BASE, filename="video.mp4")
+    run(["yt-dlp", "-o", f"{BASE}/video.%(ext)s", url])
+
+    video_file = next(f for f in os.listdir(BASE) if f.startswith("video") and not f.endswith(".json"))
+    video_path = f"{BASE}/{video_file}"
 
     update("Fetching subtitles...")
-    caption = yt.captions.get_by_language_code('en')
-    if caption:
-        srt_content = caption.generate_srt_captions()
-        caption_file = f"{BASE}/video.en.vtt"
-        with open(caption_file, "w", encoding="utf-8") as f:
-            f.write(srt_content)
-        with open(caption_file, encoding="utf-8") as f:
+    run(["yt-dlp", "--write-auto-sub", "--skip-download", "-o", f"{BASE}/video", url])
+
+    subtitle_file = next((f for f in os.listdir(BASE) if f.endswith(".vtt")), None)
+    if subtitle_file:
+        with open(f"{BASE}/{subtitle_file}", encoding="utf-8") as f:
             transcript = f.read()
     else:
         transcript = "No captions available"
