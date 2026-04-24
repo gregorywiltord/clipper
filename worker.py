@@ -2,20 +2,27 @@ import os, json, subprocess, requests, sys
 
 job_id = sys.argv[1]
 BASE = f"/data/{job_id}"
+os.makedirs(BASE, exist_ok=True)
 
 def update(msg):
     with open(f"{BASE}/status.txt", "w") as f:
         f.write(msg)
 
 def run(cmd):
-    subprocess.run(cmd, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        error_msg = result.stderr or result.stdout or "Unknown error"
+        print(f"DEBUG - Command: {' '.join(cmd)}")
+        print(f"DEBUG - Return code: {result.returncode}")
+        print(f"DEBUG - Error: {error_msg}")
+        raise Exception(f"Command failed: {' '.join(cmd)}\n{error_msg}")
 
 try:
     data = json.load(open(f"{BASE}/input.json"))
     url, api_key = data["url"], data["api_key"]
 
     update("Downloading video...")
-    run(["yt-dlp", "-f", "best[height<=720]", "-o", f"{BASE}/video.%(ext)s", url])
+    run(["yt-dlp", "-f", "best", "-o", f"{BASE}/video.%(ext)s", url])
 
     video_file = next(f for f in os.listdir(BASE) if f.startswith("video") and not f.endswith(".json"))
     video_path = f"{BASE}/{video_file}"
