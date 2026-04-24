@@ -1,4 +1,5 @@
-import os, json, subprocess, requests, sys
+import os, json, subprocess, requests, sys, time
+from pytube import YouTube
 
 job_id = sys.argv[1]
 BASE = f"/data/{job_id}"
@@ -19,7 +20,6 @@ def run(cmd, retries=3):
         print(f"DEBUG - Return code: {result.returncode}")
         print(f"DEBUG - Error: {error_msg}")
         if attempt < retries - 1:
-            import time
             time.sleep(5 * (2 ** attempt))  # longer backoff
     raise Exception(f"Command failed after {retries} attempts: {' '.join(cmd)}\n{error_msg}")
 
@@ -28,17 +28,23 @@ try:
     url, api_key = data["url"], data["api_key"]
 
     update("Downloading video...")
-    run(["yt-dlp", "-U", "--socket-timeout", "30", "--extractor-args", "youtube:player_client=web", "-o", f"{BASE}/video.%(ext)s", url])
-
-    video_file = next(f for f in os.listdir(BASE) if f.startswith("video") and not f.endswith(".json"))
-    video_path = f"{BASE}/{video_file}"
+    yt = YouTube(url)
+    stream = yt.streams.filter(progressive=False, file_extension='mp4').order_by('resolution').desc().first()
+    if not stream:
+        stream = yt.streams.get_highest_resolution()
+    video_path = stream.download(BASE, filename="video.mp4")
 
     update("Fetching subtitles...")
-    run(["yt-dlp", "-U", "--socket-timeout", "30", "--extractor-args", "youtube:player_client=web", "--write-auto-sub", "--skip-download", "-o", f"{BASE}/video", url])
-
-    subtitle_file = next(f for f in os.listdir(BASE) if f.endswith(".vtt"))
-    with open(f"{BASE}/{subtitle_file}", encoding="utf-8") as f:
-        transcript = f.read()
+    caption = yt.captions.get_by_language_code('en')
+    if caption:
+        srt_content = caption.generate_srt_captions()
+        caption_file = f"{BASE}/video.en.vtt"
+        with open(caption_file, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+        with open(caption_file, encoding="utf-8") as f:
+            transcript = f.read()
+    else:
+        transcript = "No captions available"
 
     update("Analyzing with Gemini...")
     prompt = f'Extract 3-5 viral clips. Return ONLY JSON array: [{{"start":0,"end":10}}]\n\n{transcript[:10000]}'
