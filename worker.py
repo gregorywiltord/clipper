@@ -20,7 +20,7 @@ def run(cmd, retries=3):
         print(f"DEBUG - Error: {error_msg}")
         if attempt < retries - 1:
             import time
-            time.sleep(2 ** attempt)  # exponential backoff
+            time.sleep(5 * (2 ** attempt))  # longer backoff
     raise Exception(f"Command failed after {retries} attempts: {' '.join(cmd)}\n{error_msg}")
 
 try:
@@ -28,13 +28,13 @@ try:
     url, api_key = data["url"], data["api_key"]
 
     update("Downloading video...")
-    run(["yt-dlp", "--extractor-args", "youtube:player_client=android", "-o", f"{BASE}/video.%(ext)s", url])
+    run(["yt-dlp", "-U", "--socket-timeout", "30", "--extractor-args", "youtube:player_client=web", "-o", f"{BASE}/video.%(ext)s", url])
 
     video_file = next(f for f in os.listdir(BASE) if f.startswith("video") and not f.endswith(".json"))
     video_path = f"{BASE}/{video_file}"
 
     update("Fetching subtitles...")
-    run(["yt-dlp", "--extractor-args", "youtube:player_client=android", "--write-auto-sub", "--skip-download", "-o", f"{BASE}/video", url])
+    run(["yt-dlp", "-U", "--socket-timeout", "30", "--extractor-args", "youtube:player_client=web", "--write-auto-sub", "--skip-download", "-o", f"{BASE}/video", url])
 
     subtitle_file = next(f for f in os.listdir(BASE) if f.endswith(".vtt"))
     with open(f"{BASE}/{subtitle_file}", encoding="utf-8") as f:
