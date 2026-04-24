@@ -8,27 +8,33 @@ def update(msg):
     with open(f"{BASE}/status.txt", "w") as f:
         f.write(msg)
 
-def run(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
+def run(cmd, retries=3):
+    for attempt in range(retries):
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            return
         error_msg = result.stderr or result.stdout or "Unknown error"
+        print(f"DEBUG - Attempt {attempt + 1}/{retries}")
         print(f"DEBUG - Command: {' '.join(cmd)}")
         print(f"DEBUG - Return code: {result.returncode}")
         print(f"DEBUG - Error: {error_msg}")
-        raise Exception(f"Command failed: {' '.join(cmd)}\n{error_msg}")
+        if attempt < retries - 1:
+            import time
+            time.sleep(2 ** attempt)  # exponential backoff
+    raise Exception(f"Command failed after {retries} attempts: {' '.join(cmd)}\n{error_msg}")
 
 try:
     data = json.load(open(f"{BASE}/input.json"))
     url, api_key = data["url"], data["api_key"]
 
     update("Downloading video...")
-    run(["yt-dlp", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "-o", f"{BASE}/video.%(ext)s", url])
+    run(["yt-dlp", "--extractor-args", "youtube:player_client=android", "-o", f"{BASE}/video.%(ext)s", url])
 
     video_file = next(f for f in os.listdir(BASE) if f.startswith("video") and not f.endswith(".json"))
     video_path = f"{BASE}/{video_file}"
 
     update("Fetching subtitles...")
-    run(["yt-dlp", "--write-auto-sub", "--skip-download", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "-o", f"{BASE}/video", url])
+    run(["yt-dlp", "--extractor-args", "youtube:player_client=android", "--write-auto-sub", "--skip-download", "-o", f"{BASE}/video", url])
 
     subtitle_file = next(f for f in os.listdir(BASE) if f.endswith(".vtt"))
     with open(f"{BASE}/{subtitle_file}", encoding="utf-8") as f:
